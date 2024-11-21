@@ -1,37 +1,99 @@
-import { Button, Card, CardContent, Dialog, DialogContent, DialogTitle, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Avatar, Button, Card, CardContent, CardHeader, Chip, Dialog, DialogContent, DialogTitle, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { useAuth } from "../../hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { LoadingButton } from "@mui/lab";
+import CloseIcon from '@mui/icons-material/Close';
+import { AuthService } from "../../services/auth-service";
+import { toast } from "react-toastify";
 
 
 function HomePage() {
   const navigate = useNavigate();
-  const { user, setUser } = useAuth();
+  const { user, setUser, setFactorId, factorId } = useAuth();
   const [qrCode, setQrCode] = useState<string>('')
   const [openDialog, setOpenDialog] = useState<boolean>(false);
-  const [factorId, setFactorId] = useState<string>('');
   const [hasVerified, setHasVerified] = useState<boolean>(false);
   const [verifiedCode, setVerifiedCode] = useState<string>('');
-
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     loadFactor();
   }, []);
 
   const loadFactor = async () => {
-
+    AuthService.mfa.getFactorId()
+      .then(result => {
+        if (result.factorID) {
+          setHasVerified(true);
+          setFactorId(result.factorID);
+        }
+      })
+      .catch(error => {
+        toast.error(String(error));
+      });
   }
 
   const handleConfigure = async () => {
+    AuthService.mfa.configure()
+      .then(result => {
+        if (result) {
+          setFactorId(result.id);
 
+          if (result.totp) {
+            const { qr_code } = result.totp;
+            setQrCode(qr_code);
+            setOpenDialog(true);
+          }
+        }
+      })
+      .catch(error => {
+        toast.error(String(error));
+      });
   }
 
   const handleVerify = async () => {
 
+    setLoading(true);
+
+    AuthService.mfa.verifyCode(factorId, verifiedCode)
+      .then(result => {
+        if (result.user && result.user.factors) {
+          if (result.user.factors[0].status == 'verified') {
+            toast.success('Auntenticação Dois Fatores Habilitada');
+            setHasVerified(true);
+            setOpenDialog(false);
+          }
+        }
+      })
+      .catch(() => {
+        toast.error('Código inválido!');
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+
   }
 
   const handleRemove = async () => {
+    AuthService.mfa.remove(factorId)
+      .then(result => {
+        if (result) setHasVerified(false);
+      })
+      .catch(error => {
+        toast.error(String(error))
+      });
+  }
 
+  const handleSignOut = () => {
+    AuthService.signOut()
+      .then(() => {
+        setUser(null);
+        navigate('/auth/sign-in', { replace: true })
+      })
+      .catch(error => {
+        toast.error(String(error));
+      });
   }
 
   return (
@@ -46,6 +108,22 @@ function HomePage() {
       }}
     >
       <Card>
+        <CardHeader
+          avatar={
+            <Avatar alt={user?.name}></Avatar>
+          }
+          action={
+            <Tooltip title="Fazer logout">
+              <IconButton
+                onClick={handleSignOut}
+              >
+                <CloseIcon />
+              </IconButton>
+            </Tooltip>
+          }
+          title={user?.name}
+          subheader={user?.email}
+        />
         <CardContent
           sx={{
             padding: '4rem',
@@ -53,15 +131,15 @@ function HomePage() {
           }}
         >
           <Typography
-            variant="h6"
-            component="p"
+            variant="h5"
             textAlign="center"
+            sx={{
+              marginBottom: '1rem'
+            }}
           >
-            Seja bem vindo, {user?.name}
+            Autenticação Dois Passos
           </Typography>
-
-          <TableContainer component={Paper}
-            sx={{ marginTop: '2rem' }}>
+          <TableContainer component={Paper}>
             <Table sx={{ width: "100%" }}>
               <TableHead>
                 <TableRow>
@@ -76,12 +154,31 @@ function HomePage() {
                     App Autenticador
                   </TableCell>
                   <TableCell align="center">
-
-                    {/* TO-DO: Implementar aqui */}
+                    {hasVerified ? (
+                      <Chip color="primary" label="Verificado" />
+                    ) : (
+                      <Chip label="Não Verificado" />
+                    )}
 
                   </TableCell>
                   <TableCell align="center">
-                    {/* TO-DO: Implementar aqui */}
+                    {hasVerified ? (
+                      <Button
+                        variant="contained"
+                        size="small"
+                        onClick={handleRemove}
+                      >
+                        Remover
+                      </Button>
+                    ) : (
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={handleConfigure}
+                      >
+                        Configurar
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               </TableBody>
@@ -102,18 +199,20 @@ function HomePage() {
             <TextField
               size="small"
               variant="outlined"
+              onChange={event => setVerifiedCode(event.target.value)}
             />
-
-            <Button
-              variant="contained"
-              size="small"
+          <LoadingButton
+            variant="contained"
+            loading={loading}
+            size="small"
               onClick={handleVerify}
-            >
-              Verificar
-            </Button>
+          >
+            Verificar
+          </LoadingButton>
           </Stack>
         </DialogContent>
       </Dialog>
+
     </Stack>
   )
 }
